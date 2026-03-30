@@ -12,7 +12,7 @@
 <title>Caisse SaaS Pro - Envoi en temps réel</title>
 
 <!-- PWA -->
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
@@ -616,21 +616,14 @@ function PanierContent({ T, items, setItems, total, addSale, flashMsg, useBLE, p
       <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:18, fontWeight:800}}><span>TOTAL</span><span>{fmtPrice(total)}</span></div>
       <div style={{marginBottom:8}}><input type="number" placeholder="Montant reçu (F)" value={recu} onChange={e=>setRecu(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, color:T.text}} /></div>
       {recu !== "" && monnaie !== null && (<div style={{padding:8, borderRadius:8, marginBottom:8, background: monnaie>=0 ? T.btnGreen.bg : T.btnRed.bg, textAlign:"center"}}><span style={{fontWeight:700}}>{monnaie>=0 ? "Monnaie à rendre:" : "Manque:"}</span> <span style={{fontSize:18, fontWeight:800}}>{fmtPrice(Math.abs(monnaie))}</span></div>)}
-      {posMode === "VENDEUR" ? (
-        <>
+      {posMode === "VENDEUR" ? (<>
           <input placeholder="Note pour le caissier (optionnel)" ref={noteInputRef} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:8, color:T.text}} />
-          <button onClick={handleSendToQueue} style={{width:"100%", background:T.orange, borderRadius:12, padding:12, fontWeight:700, color:T.bg, display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:8}}>📤 Envoyer au caissier</button>
+          <button onClick={handleSendToQueue} style={{width:"100%", background:T.orange, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>📤 Envoyer au caissier</button>
           <div style={{display:"flex", gap:6}}>
             <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); }} style={{flex:1, background:T.btnGreen.bg, border:`1px solid ${T.btnGreen.border}`, borderRadius:12, padding:10, fontWeight:700, color:T.green, fontSize:12}}>🖨️ Vendre & Imprimer</button>
             <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); }} style={{flex:1, background:T.btnBlue.bg, border:`1px solid ${T.btnBlue.border}`, borderRadius:12, padding:10, fontWeight:700, color:T.blue, fontSize:12}}>✅ Vendre direct</button>
           </div>
-        </>
-      ) : (
-        <>
-          <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.green, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>🖨️ Valider & Imprimer</button>
-          <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.blue, borderRadius:12, padding:12, fontWeight:700, color:T.bg}}>✅ Valider sans ticket</button>
-        </>
-      )}
+        </>) : (<><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.green, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>🖨️ Valider & Imprimer</button><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.blue, borderRadius:12, padding:12, fontWeight:700, color:T.bg}}>✅ Valider sans ticket</button></>)}
     </div>
   </div>);
 }
@@ -962,13 +955,17 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [devMode, setDevMode] = useState(false);
-  const [devPin, setDevPin] = useState("");
+  const [devPinModal, setDevPinModal] = useState(false);
+  const [devPinInput, setDevPinInput] = useState("");
+  const [devPinError, setDevPinError] = useState(false);
+  const [devPinShake, setDevPinShake] = useState(false);
   const [toast, setToast] = useState(null);
   const clickCountRef = useRef({ count: 0, timer: null });
   
   useEffect(()=>{ document.body.style.background = T.bg; localStorage.setItem("pos_theme", themeName); }, [themeName]);
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
-  const handleLogoTripleClick = () => { const ref = clickCountRef.current; ref.count++; clearTimeout(ref.timer); if (ref.count >= 3) { ref.count = 0; setDevMode(true); } ref.timer = setTimeout(() => { ref.count = 0; }, 500); };
+  const handleLogoTripleClick = () => { const ref = clickCountRef.current; ref.count++; clearTimeout(ref.timer); if (ref.count >= 3) { ref.count = 0; setDevPinModal(true); setDevPinInput(""); setDevPinError(false); } ref.timer = setTimeout(() => { ref.count = 0; }, 500); };
+  const handleDevPinSubmit = () => { if (devPinInput === DEV_PIN) { setDevPinModal(false); setDevPinInput(""); setDevMode(true); } else { setDevPinError(true); setDevPinShake(true); setTimeout(() => { setDevPinShake(false); setDevPinInput(""); setDevPinError(false); }, 700); } };
   
   const handleRegister = async () => {
     if(!authShopName.trim() || !authOwnerName.trim() || !authWhatsapp.trim() || authPassword.length<4 || authPassword!==authConfirm) { setAuthError("Vérifiez les champs"); return; }
@@ -1014,7 +1011,9 @@ function App() {
   };
   
   if (devMode) { return <DevDashboard T={T} themeName={themeName} setThemeName={setThemeName} logout={()=>setDevMode(false)} flashMsg={showToast} />; }
-  if(!session) return (<div style={{minHeight:"100dvh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", padding:16}}>{toast && <Toast message={toast} onClose={()=>setToast(null)} />}<div style={{maxWidth:420, width:"100%", background:T.surface, borderRadius:28, padding:"20px"}}><div style={{textAlign:"center", marginBottom:24, cursor:"pointer"}} onClick={handleLogoTripleClick}><div style={{fontSize:48}}>🏪</div><div style={{fontFamily:"'Outfit'", fontSize:28, fontWeight:800, color:T.accent}}>Caisse SaaS Pro</div><div style={{fontSize:10, color:T.textMute}}>Triple-clic mode développeur</div></div>
+  if(!session) return (<div style={{minHeight:"100dvh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", padding:16}}>{toast && <Toast message={toast} onClose={()=>setToast(null)} />}
+    {devPinModal && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.97)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999}}><div style={{background:T.surface, borderRadius:32, padding:28, width:"90%", maxWidth:340, textAlign:"center"}}><div style={{fontSize:36, marginBottom:8}}>🔐</div><div style={{fontFamily:"'Outfit'", fontWeight:800, fontSize:18, color:T.accent, marginBottom:4}}>Accès Développeur</div><div style={{fontSize:11, color:T.textMute, marginBottom:20}}>Entrez votre code PIN</div><div style={{display:"flex", gap:12, justifyContent:"center", marginBottom:20, animation:devPinShake?"shake 0.35s ease":"none"}}>{Array(6).fill(0).map((_,i)=><div key={i} style={{width:14,height:14,borderRadius:"50%",background:i<devPinInput.length?(devPinError?T.red:T.accent):T.border}} />)}</div><div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12}}>{[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>(<button key={i} onClick={()=>{ if(d==="⌫") setDevPinInput(p=>p.slice(0,-1)); else if(d!=="" && devPinInput.length<6) setDevPinInput(p=>p+d); }} style={{background:d===""?"transparent":T.surface2, borderRadius:12, height:52, fontSize:20, border:"none", color:T.text}}>{d}</button>))}</div><button onClick={handleDevPinSubmit} style={{width:"100%", background:T.accent, borderRadius:12, padding:12, fontWeight:800, color:T.bg, marginBottom:8}}>Valider</button><button onClick={()=>{setDevPinModal(false); setDevPinInput("");}} style={{width:"100%", background:"transparent", border:"none", color:T.textMute, fontSize:13}}>Annuler</button></div></div>)}
+    <div style={{maxWidth:420, width:"100%", background:T.surface, borderRadius:28, padding:"20px"}}><div style={{textAlign:"center", marginBottom:24, cursor:"pointer"}} onClick={handleLogoTripleClick}><div style={{fontSize:48}}>🏪</div><div style={{fontFamily:"'Outfit'", fontSize:28, fontWeight:800, color:T.accent}}>Caisse SaaS Pro</div></div>
     <div style={{display:"flex", gap:8, marginBottom:20, background:T.surface2, borderRadius:12, padding:4}}><button onClick={()=>{setAuthMode("login"); setAuthError("");}} style={{flex:1, background:authMode==="login"?T.accent:"transparent", border:"none", borderRadius:8, padding:"8px", fontWeight:700, color:authMode==="login"?T.bg:T.textSub}}>Connexion</button><button onClick={()=>{setAuthMode("register"); setAuthError("");}} style={{flex:1, background:authMode==="register"?T.accent:"transparent", border:"none", borderRadius:8, padding:"8px", fontWeight:700, color:authMode==="register"?T.bg:T.textSub}}>Créer</button></div>
     <div style={{display:"flex", flexDirection:"column", gap:12}}><input placeholder="Nom du commerce" value={authShopName} onChange={e=>setAuthShopName(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px", color:T.text}} />
     {authMode==="register" && (<><input placeholder="Nom du propriétaire" value={authOwnerName} onChange={e=>setAuthOwnerName(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /><input placeholder="WhatsApp" value={authWhatsapp} onChange={e=>setAuthWhatsapp(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /><input placeholder="Téléphone" value={authPhone} onChange={e=>setAuthPhone(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /></>)}
@@ -1029,27 +1028,26 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 
 <script>
-// ── PWA Service Worker — Compatible Vercel/HTTPS ──
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js", { scope: "./" })
-      .then((reg) => {
-        console.log("[PWA] SW enregistré :", reg.scope);
-        reg.addEventListener("updatefound", () => {
-          const w = reg.installing;
+  window.addEventListener("load", function() {
+    navigator.serviceWorker.register("/sw.js")
+      .then(function(reg) {
+        console.log("[PWA] SW OK:", reg.scope);
+        reg.addEventListener("updatefound", function() {
+          var w = reg.installing;
           if (!w) return;
-          w.addEventListener("statechange", () => {
+          w.addEventListener("statechange", function() {
             if (w.state === "installed" && navigator.serviceWorker.controller) {
-              window.dispatchEvent(new CustomEvent("sw-update-available", { detail: { reg } }));
+              window.dispatchEvent(new CustomEvent("sw-update-available"));
             }
           });
         });
-        let refreshing = false;
-        navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (!refreshing) { refreshing = true; window.location.reload(); }
-        });
       })
-      .catch(err => console.warn("[PWA] Erreur SW:", err));
+      .catch(function(e) { console.warn("[PWA] SW erreur:", e); });
+    var refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function() {
+      if (!refreshing) { refreshing = true; window.location.reload(); }
+    });
   });
 }
 </script>
