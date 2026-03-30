@@ -1015,7 +1015,34 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 
 <script>
-if ("serviceWorker" in navigator) { navigator.serviceWorker.getRegistrations().then((regs) => { regs.forEach((reg) => reg.unregister()); }); }
+// ── Enregistrement Service Worker PWA ──────────────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+      .then((reg) => {
+        console.log("[PWA] SW enregistré, scope:", reg.scope);
+
+        // Détection de mise à jour disponible
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              // Nouvelle version détectée → notifier l'UI via un événement custom
+              window.dispatchEvent(new CustomEvent("sw-update-available", { detail: { reg } }));
+            }
+          });
+        });
+
+        // Rechargement automatique lors de l'activation d'un nouveau SW
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (!refreshing) { refreshing = true; window.location.reload(); }
+        });
+      })
+      .catch((err) => console.warn("[PWA] Erreur SW:", err));
+  });
+}
 </script>
 </body>
 </html>

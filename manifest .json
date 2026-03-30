@@ -1,12 +1,15 @@
 {
-  "name": "Caisse SaaS Pro",
+  "name": "Caisse SaaS Pro – DIGITALE SOLUTION",
   "short_name": "Caisse Pro",
-  "description": "Gestion de caisse professionnelle avec abonnements, dépenses et bénéfices",
-  "start_url": "/",
+  "description": "Caisse enregistreuse SaaS avec synchronisation Firebase et impression BLE 80mm",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
-  "theme_color": "#0A0E12",
+  "orientation": "portrait-primary",
   "background_color": "#0A0E12",
+  "theme_color": "#0A0E12",
+  "lang": "fr-FR",
+  "categories": ["business", "finance", "productivity"],
   "icons": [
     {
       "src": "icon-192.png",
@@ -22,7 +25,14 @@
     }
   ],
   "screenshots": [],
-  "categories": ["business", "finance", "productivity"],
-  "lang": "fr",
-  "dir": "ltr"
+  "shortcuts": [
+    {
+      "name": "Nouvelle vente",
+      "short_name": "Vente",
+      "description": "Ouvrir la caisse directement",
+      "url": "./index.html",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
 }
