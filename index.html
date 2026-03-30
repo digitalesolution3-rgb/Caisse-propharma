@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Caisse Pro">
+<meta name="theme-color" content="#0A0E12">
+<meta name="description" content="Caisse enregistreuse SaaS – Impression BLE 80mm – DIGITALE SOLUTION">
+<title>Caisse SaaS Pro - Envoi en temps réel</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+
+<!-- Firebase SDK -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-firestore-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-auth-compat.min.js"></script>
+
+<!-- React + Babel -->
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Mono','Courier New',monospace;-webkit-tap-highlight-color:transparent}
+#root{height:100dvh;display:flex;flex-direction:column}
+input,button,select{font-family:inherit}
+button{cursor:pointer;transition:opacity .12s,transform .12s}
+button:active{opacity:.72!important;transform:scale(.96)!important}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{border-radius:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin .8s linear infinite}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes marquee{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+.marquee{animation:marquee 25s linear infinite;white-space:nowrap;display:inline-block;padding-right:50px}
+@media (max-width: 599px) {
+  .desktop-sidebar { display: none !important; }
+  .hdr-text-label { display: none !important; }
+  .product-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .mobile-cart-fab { display: flex !important; }
+}
+@media (min-width: 600px) and (max-width: 959px) {
+  .desktop-sidebar { display: none !important; }
+  .product-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .mobile-cart-fab { display: flex !important; }
+}
+@media (min-width: 960px) {
+  .desktop-grid { display: flex; flex-direction: row; height: 100dvh; overflow: hidden; }
+  .desktop-sidebar { width: 360px; flex-shrink: 0; overflow-y: auto; display: flex !important; flex-direction: column; }
+  .desktop-main { flex: 1; overflow-y: auto; min-width: 0; }
+  .product-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .mobile-cart-fab { display: none !important; }
+  .mobile-cart-overlay { display: none !important; }
+}
+.mobile-cart-fab { display: none; }
+.connection-badge { position: fixed; bottom: 10px; right: 10px; z-index: 1000; padding: 4px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 8px 16px; border-radius: 8px; font-size: 12px; z-index: 2000; animation: fadeInOut 2s ease; }
+@keyframes fadeInOut { 0% { opacity: 0; transform: translateX(-50%) translateY(20px); } 15% { opacity: 1; transform: translateX(-50%) translateY(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
+.command-badge { background: #FF8844; color: #fff; padding: 4px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; animation: pulse 1s infinite; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+class VocalCaissier {
+  constructor(options = {}) {
+    this.lang = options.lang || 'fr-FR';
+    this.onMontant = options.onMontant || null;
+    this.onValider = options.onValider || null;
+    this.onAnnuler = options.onAnnuler || null;
+    this.onRemise = options.onRemise || null;
+    this.onTotal = options.onTotal || null;
+    this.onMonnaie = options.onMonnaie || null;
+    this.onTranscript = options.onTranscript || null;
+    this.onError = options.onError || null;
+    this._recognition = null;
+    this._listening = false;
+    this._ttsQueue = [];
+    this._speaking = false;
+    this._initSTT();
+  }
+  _initSTT() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    this._recognition = new SR();
+    this._recognition.lang = this.lang;
+    this._recognition.continuous = true;
+    this._recognition.interimResults = true;
+    this._recognition.maxAlternatives = 2;
+    this._recognition.onresult = (e) => {
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript.trim();
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (this.onTranscript) this.onTranscript({ final, interim });
+      if (final) this._parseCommand(final.toLowerCase());
+    };
+    this._recognition.onerror = (e) => { if (e.error !== 'no-speech' && this.onError) this.onError(e.error); };
+    this._recognition.onend = () => { if (this._listening) setTimeout(() => { try { this._recognition.start(); } catch(_) {} }, 300); };
+  }
+  start() { if (!this._recognition) return; this._listening = true; try { this._recognition.start(); } catch(_) {} }
+  stop() { this._listening = false; if (this._recognition) try { this._recognition.stop(); } catch(_) {} }
+  _parseCommand(txt) {
+    const remiseMatch = txt.match(/remise\s+(.+?)\s+(?:pour\s+cent|%|pourcent)/i) || txt.match(/(\d+)\s*%/);
+    if (remiseMatch) { const pct = this._parseFrenchNumber(remiseMatch[1]) || parseInt(remiseMatch[1]); if (!isNaN(pct) && pct > 0 && this.onRemise) { this.onRemise(pct); return; } }
+    const montantPatterns = [/(?:re[çc]u|reçoit|montant\s+re[çc]u|paye|payé|client\s+donne)\s+(.+)/i, /^(.+?)\s+(?:francs?|fcfa|cfa)$/i];
+    for (const pat of montantPatterns) {
+      const m = txt.match(pat);
+      if (m) {
+        const val = this._parseFrenchNumber(m[1]);
+        if (val > 0 && this.onMontant) { this.onMontant(val); return; }
+        const num = parseInt(m[1].replace(/\s/g,''));
+        if (!isNaN(num) && num > 0 && this.onMontant) { this.onMontant(num); return; }
+      }
+    }
+    if (/\b(valid|confirm|encaiss|c'est\s*bon|terminer|finir)\b/.test(txt)) { if (this.onValider) this.onValider(); return; }
+    if (/\b(annul|supprim|effac|reset|recommenc)\b/.test(txt)) { if (this.onAnnuler) this.onAnnuler(); return; }
+    if (/\b(total|combien|montant|à payer)\b/.test(txt)) { if (this.onTotal) this.onTotal(); return; }
+    if (/\b(monnaie|rendu|reste|rendre)\b/.test(txt)) { if (this.onMonnaie) this.onMonnaie(); return; }
+  }
+  _parseFrenchNumber(txt) {
+    if (!txt) return 0;
+    const clean = txt.toLowerCase().replace(/[,\.]/g,'').replace(/-/g,' ').replace(/\s+/g,' ').trim();
+    const direct = parseInt(clean.replace(/\s/g,''));
+    if (!isNaN(direct)) return direct;
+    const words = { zéro:0,zero:0,un:1,une:1,deux:2,trois:3,quatre:4,cinq:5,six:6,sept:7,huit:8,neuf:9,dix:10,onze:11,douze:12,treize:13,quatorze:14,quinze:15,seize:16,'dix sept':17,'dix huit':18,'dix neuf':19,vingt:20,trente:30,quarante:40,cinquante:50,soixante:60,'soixante dix':70,'quatre vingt':80,'quatre vingt dix':90,cent:100,cents:100,mille:1000,millions:1000000,million:1000000 };
+    let total = 0, current = 0;
+    const tokens = clean.split(' ');
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (i < tokens.length - 1) { const duo = t+' '+tokens[i+1]; if (words[duo]!==undefined) { current += words[duo]; i++; continue; } }
+      if (words[t]!==undefined) { const v=words[t]; if(v===1000){total+=(current||1)*1000;current=0;}else if(v===1000000){total+=(current||1)*1000000;current=0;}else if(v===100){current=(current||1)*100;}else{current+=v;} }
+      else { const n=parseInt(t); if(!isNaN(n)) current+=n; }
+    }
+    return total + current;
+  }
+  speak(text) { this._ttsQueue.push(text); if (!this._speaking) this._speakNext(); }
+  _speakNext() {
+    if (!this._ttsQueue.length) { this._speaking = false; return; }
+    this._speaking = true;
+    const text = this._ttsQueue.shift();
+    if (!window.speechSynthesis) { this._speaking = false; return; }
+    speechSynthesis.cancel();
+    const doSpeak = () => {
+      try {
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.lang = this.lang; utt.rate = 0.92; utt.pitch = 1;
+        const voices = speechSynthesis.getVoices();
+        const frVoice = voices.find(v => v.lang === 'fr-FR') || voices.find(v => v.lang.startsWith('fr'));
+        if (frVoice) utt.voice = frVoice;
+        utt.onend = () => this._speakNext();
+        utt.onerror = () => { this._speaking = false; this._speakNext(); };
+        speechSynthesis.speak(utt);
+      } catch(e) { this._speaking = false; this._speakNext(); }
+    };
+    const voices = speechSynthesis.getVoices();
+    if (voices.length > 0) { doSpeak(); }
+    else { speechSynthesis.addEventListener('voiceschanged', doSpeak, { once: true }); }
+  }
+  announceTotal(total, recu = 0) {
+    const monnaie = recu - total;
+    let msg = `Total : ${this._fmt(total)} francs.`;
+    if (recu > 0) { msg += ` Reçu : ${this._fmt(recu)} francs.`; msg += monnaie >= 0 ? ` Monnaie à rendre : ${this._fmt(monnaie)} francs.` : ` Montant insuffisant.`; }
+    this.speak(msg);
+  }
+  _fmt(n) { return new Intl.NumberFormat('fr-FR').format(n); }
+  isSupported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+}
+window.VocalCaissier = VocalCaissier;
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD9nisNmNnagzRp-jNlwTbJ7q5bdPtF9Jw",
+  authDomain: "inte-84ea7.firebaseapp.com",
+  projectId: "inte-84ea7",
+  storageBucket: "inte-84ea7.firebasestorage.app",
+  messagingSenderId: "958738051181",
+  appId: "1:958738051181:web:e305c5d8cb1a4b95680f64",
+};
+
+let db = null, auth = null;
+let persistenceEnabled = false;
+
+try {
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  db.settings({ experimentalForceLongPolling: true, merge: true });
+  
+  // Activation persistance avec gestion d'erreur silencieuse
+  db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+    console.warn("Persistence non activée:", err.code);
+    persistenceEnabled = false;
+  }).then(() => { persistenceEnabled = true; });
+} catch(e) { console.warn(e); }
+
+const DEV_PIN = "761278";
+const DEV_WHATSAPP = "22678548317";
+
+const THEMES = {
+  dark: { id:"dark", label:"🌙", bg:"#0A0E12", surface:"#111620", surface2:"#161C28", header:"#080C10", border:"#1E2630", text:"#E8E4DA", textSub:"#A8A49A", textMute:"#3A4050", accent:"#F5C842", green:"#22DD88", blue:"#5AB4FF", red:"#FF5555", orange:"#FF8844", purple:"#AA77FF", inputBg:"#080C10", inputBd:"#252D3A", btnGreen:{bg:"#0A2018",border:"#1A5030",color:"#22DD88"}, btnBlue:{bg:"#0D1E2E",border:"#1A3548",color:"#5AB4FF"}, btnRed:{bg:"#1E0808",border:"#3A1818",color:"#FF5555"} },
+  light: { id:"light", label:"☀️", bg:"#F4F6F8", surface:"#FFFFFF", surface2:"#E8ECF0", header:"#FFFFFF", border:"#D0D8E0", text:"#1A2030", textSub:"#4A5568", textMute:"#9AA5B4", accent:"#D4A017", green:"#1A9E5A", blue:"#2878C8", red:"#D93030", orange:"#D06020", purple:"#7C50DD", inputBg:"#F8FAFC", inputBd:"#C8D4DE", btnGreen:{bg:"#E8F8EE",border:"#A8DDBC",color:"#1A7A45"}, btnBlue:{bg:"#EAF2FC",border:"#A8C8EE",color:"#1A60A8"}, btnRed:{bg:"#FDEAEA",border:"#F0B0B0",color:"#B02020"} },
+  neon: { id:"neon", label:"⚡", bg:"#03050A", surface:"#080D14", surface2:"#0C1220", header:"#020408", border:"#0E2040", text:"#E0F8FF", textSub:"#70B8D8", textMute:"#1A3050", accent:"#00FFCC", green:"#00FF88", blue:"#00C8FF", red:"#FF2255", orange:"#FF8800", purple:"#CC44FF", inputBg:"#040810", inputBd:"#0E2040", btnGreen:{bg:"#001A10",border:"#00FF8855",color:"#00FF88"}, btnBlue:{bg:"#001428",border:"#00C8FF55",color:"#00C8FF"}, btnRed:{bg:"#1A0010",border:"#FF225555",color:"#FF2255"} },
+};
+
+function fmtPrice(n) { if (!n && n !== 0) return "0 F"; return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " F"; }
+function formatDate(ts) { if(!ts) return "—"; return new Date(ts).toLocaleDateString("fr-FR"); }
+function getDaysLeft(endTimestamp) { if(!endTimestamp) return 0; const diff = endTimestamp - Date.now(); return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24))); }
+function calculateEndDate(startDate, plan) { const end = new Date(startDate); end.setDate(end.getDate() + (plan === "mensuel"?30:plan === "trimestriel"?90:365)); return end.getTime(); }
+function getStoreKey(shopId, type) { return `pos_${shopId}_${type}`; }
+class OfflineStore { static get(shopId, type) { try { const d = localStorage.getItem(getStoreKey(shopId, type)); return d ? JSON.parse(d) : []; } catch(e){ return []; } } static set(shopId, type, data) { try { localStorage.setItem(getStoreKey(shopId, type), JSON.stringify(data || [])); } catch(e){} } }
+
+function useRealtimeCollection(shopId, collectionName, initialData = []) {
+  const [data, setData] = useState(() => OfflineStore.get(shopId, collectionName) || initialData);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!db || !shopId) { setLoading(false); return; }
+    const unsubscribe = db.collection("shops").doc(shopId).collection(collectionName).onSnapshot(snapshot => {
+      const newData = []; snapshot.forEach(doc => { if (doc.id !== "_init") newData.push({ id: doc.id, ...doc.data() }); });
+      setData(newData); OfflineStore.set(shopId, collectionName, newData); setLoading(false);
+    }, err => { console.warn(`Erreur ${collectionName}:`, err.code); setLoading(false); });
+    return () => unsubscribe();
+  }, [shopId, collectionName]);
+  return { data, loading };
+}
+
+function useRealtimeDocument(shopId) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!db || !shopId) { setLoading(false); return; }
+    const unsubscribe = db.collection("shops").doc(shopId).onSnapshot(doc => { if (doc.exists) setData({ id: doc.id, ...doc.data() }); setLoading(false); }, () => setLoading(false));
+    return () => unsubscribe();
+  }, [shopId]);
+  return { data, loading };
+}
+
+function ConnectionStatus({ T }) {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
+  }, []);
+  return <div className="connection-badge" style={{ background: isOnline ? T.green : T.orange, color: "#fff" }}>{isOnline ? "🟢 Connecté" : "🟡 Hors-ligne"}</div>;
+}
+
+function Toast({ message, onClose }) { useEffect(() => { const t = setTimeout(onClose, 2000); return () => clearTimeout(t); }, [onClose]); return <div className="toast">{message}</div>; }
+
+function SubscriptionBanner({ T, shopId }) {
+  const { data: shop, loading } = useRealtimeDocument(shopId);
+  if(loading || !shop || !shop.subscriptionEnd) return null;
+  const daysLeft = getDaysLeft(shop.subscriptionEnd);
+  const expired = daysLeft === 0;
+  const warning = daysLeft <= 7 && daysLeft > 0;
+  if(!expired && !warning) return null;
+  const bgColor = expired ? T.red : T.orange;
+  const message = expired ? `⚠️ ABONNEMENT EXPIRE ! Contactez l'administrateur. ⚠️` : `🔔 Abonnement expire dans ${daysLeft} jour(s). 🔔`;
+  return (<div style={{ background: bgColor, color: "#fff", padding: "8px 12px", overflow: "hidden", whiteSpace: "nowrap", position: "relative", flexShrink: 0 }}><div className="marquee">{message} &nbsp;&nbsp;&nbsp; {message}</div><a href={`https://wa.me/${DEV_WHATSAPP}?text=${encodeURIComponent(`Renouvellement abonnement ${shop.shopName}`)}`} target="_blank" rel="noopener noreferrer" style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#fff", color: "#000", padding: "2px 10px", borderRadius: 20, fontSize: 10 }}>📱 WhatsApp</a></div>);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  IMPRESSION BLE 80mm
+// ══════════════════════════════════════════════════════════════════
+class BLEPrinter {
+  constructor() {
+    this.connected = false; this.device = null; this.characteristic = null; this.listeners = [];
+    this.savedDeviceId = localStorage.getItem("ble_device_id") || null;
+    this.savedDeviceName = localStorage.getItem("ble_device_name") || null;
+    this._printing = false; // flag pour éviter notification pendant impression
+  }
+  subscribe(callback) { this.listeners.push(callback); return () => { this.listeners = this.listeners.filter(l => l !== callback); }; }
+  notify(data) { this.listeners.forEach(l => l(data)); }
+
+  // Connexion initiale via scan Bluetooth
+  async connect() {
+    if (!navigator.bluetooth) throw new Error("Web Bluetooth non disponible");
+    this.notify({ status: "searching", message: "Recherche..." });
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: ["000018f0-0000-1000-8000-00805f9b34fb", "e7810a71-73ae-499d-8c15-faa9aef0c3f2"]
+    });
+    this.device = device;
+    // Sauvegarde pour reconnexion
+    localStorage.setItem("ble_device_id", device.id);
+    localStorage.setItem("ble_device_name", device.name || "Imprimante");
+    this.savedDeviceId = device.id;
+    this.savedDeviceName = device.name || "Imprimante";
+    device.addEventListener("gattserverdisconnected", () => {
+      this.connected = false;
+      // Si on est en train d'imprimer, ne pas notifier l'UI — reconnexion silencieuse
+      if (!this._printing) {
+        this.notify({ status: "disconnected", message: "Déconnecté", savedName: this.savedDeviceName });
+      }
+      setTimeout(() => this._autoReconnect(), 1500);
+    });
+    await this.doConnect();
+    this.notify({ status: "connected", message: `Connecté à ${device.name || "Imprimante"}`, name: device.name });
+    return device.name;
+  }
+
+  // Reconnexion rapide sans re-scan (1 clic)
+  async reconnect() {
+    if (!navigator.bluetooth) throw new Error("Web Bluetooth non disponible");
+    if (!this.savedDeviceId) throw new Error("Aucun appareil mémorisé");
+    this.notify({ status: "searching", message: "Reconnexion..." });
+    try {
+      const devices = await navigator.bluetooth.getDevices();
+      const saved = devices.find(d => d.id === this.savedDeviceId);
+      if (!saved) throw new Error("Appareil introuvable - utilisez 'Connecter'");
+      this.device = saved;
+      saved.addEventListener("gattserverdisconnected", () => {
+        this.connected = false;
+        if (!this._printing) {
+          this.notify({ status: "disconnected", message: "Déconnecté", savedName: this.savedDeviceName });
+        }
+        setTimeout(() => this._autoReconnect(), 1500);
+      });
+      await this.doConnect();
+      this.notify({ status: "connected", message: `Reconnecté à ${saved.name || this.savedDeviceName}`, name: saved.name || this.savedDeviceName });
+      return saved.name || this.savedDeviceName;
+    } catch(e) {
+      throw new Error("Reconnexion échouée: " + e.message);
+    }
+  }
+
+  async _autoReconnect() {
+    if (this.connected) return;
+    try { await this.reconnect(); } catch(_) {}
+  }
+
+  async doConnect() {
+    this.server = await this.device.gatt.connect();
+    const services = await this.server.getPrimaryServices();
+    for (const service of services) {
+      const chars = await service.getCharacteristics();
+      for (const char of chars) {
+        if (char.properties.write || char.properties.writeWithoutResponse) {
+          this.characteristic = char; this.connected = true; return;
+        }
+      }
+    }
+    throw new Error("Caractéristique d'écriture introuvable");
+  }
+
+  async disconnect() {
+    if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+    this.connected = false;
+    this.notify({ status: "disconnected", message: "Déconnecté", savedName: this.savedDeviceName });
+  }
+
+  forgetDevice() {
+    localStorage.removeItem("ble_device_id");
+    localStorage.removeItem("ble_device_name");
+    this.savedDeviceId = null; this.savedDeviceName = null;
+    this.disconnect();
+  }
+
+  async _ensureConnected() {
+    // Si déjà connecté, vérifie que le GATT est vraiment actif
+    if (this.connected && this.device?.gatt?.connected) return;
+    // Sinon reconnexion silencieuse
+    this.connected = false;
+    if (!this.device) throw new Error("Aucun appareil mémorisé");
+    await this.doConnect();
+  }
+
+  async print(data) {
+    // Reconnexion silencieuse si nécessaire avant chaque impression
+    try {
+      await this._ensureConnected();
+    } catch(e) {
+      throw new Error("Imprimante non connectée");
+    }
+    this._printing = true;
+    const CHUNK = 95;
+    const DELAY_NORMAL = 30;
+    const DELAY_LAST = 800; // délai long après le dernier chunk pour laisser l'imprimante finir
+    try {
+      for (let i = 0; i < data.length; i += CHUNK) {
+        const chunk = data.slice(i, i + CHUNK);
+        const isLast = (i + CHUNK) >= data.length;
+        await this.characteristic.writeValueWithoutResponse(chunk);
+        await new Promise(r => setTimeout(r, isLast ? DELAY_LAST : DELAY_NORMAL));
+      }
+    } finally {
+      this._printing = false;
+      // Reconnexion silencieuse post-impression
+      this.connected = false;
+      setTimeout(() => this._autoReconnect(), 500);
+    }
+  }
+}
+const printer = new BLEPrinter();
+
+// ── Encodage ESC/POS ────────────────────────────────────────────
+function escPos(shopName, shopPhone, items, total, invoiceNum) {
+  const enc = new TextEncoder();
+  const ESC = 0x1B, GS = 0x1D;
+  const buf = [];
+  const push = (...bytes) => bytes.forEach(b => buf.push(b));
+  const text = (str) => enc.encode(str).forEach(b => buf.push(b));
+  const line = (str = "") => { text(str); push(0x0A); };
+  const center = () => push(ESC, 0x61, 0x01);
+  const left = () => push(ESC, 0x61, 0x00);
+  const bold = (on) => push(ESC, 0x45, on ? 1 : 0);
+  const bigFont = (on) => push(GS, 0x21, on ? 0x11 : 0x00);
+  const dashes = () => line("--------------------------------");
+
+  // Reset + init
+  push(ESC, 0x40);
+  // En-tête centré
+  center(); bold(true); bigFont(true);
+  line(shopName.slice(0, 16).toUpperCase());
+  bigFont(false); bold(false);
+  if (shopPhone) line(shopPhone);
+  line(new Date().toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }));
+  line(`Ticket #${String(invoiceNum).slice(-6)}`);
+  left(); dashes();
+
+  // Articles
+  bold(true); line("ARTICLE          QTE   PRIX"); bold(false);
+  dashes();
+  items.forEach(it => {
+    const name = (it.label || it.name || "Art.").slice(0, 16).padEnd(16);
+    const qty = String(it.qty || 1).padStart(3);
+    const price = fmtPrice((it.amount || 0) * (it.qty || 1)).padStart(9);
+    line(`${name}${qty}${price}`);
+  });
+  dashes();
+
+  // Total
+  center(); bold(true); bigFont(true);
+  line(`TOTAL: ${fmtPrice(total)}`);
+  bigFont(false); bold(false);
+  dashes();
+  line("   Merci de votre visite !   ");
+  line(""); line(""); line("");
+  // Coupe papier partielle
+  push(GS, 0x56, 0x01);
+
+  return new Uint8Array(buf);
+}
+
+function printFallback(shopName, shopPhone, items, total, invoiceNum) {
+  const win = window.open("", "_blank", "width=400,height=600");
+  if (!win) { alert(`🧾 ${shopName}\nTotal: ${fmtPrice(total)}`); return; }
+  const rows = items.map(it =>
+    `<tr><td>${it.label||it.name||"Art."}</td><td style="text-align:center">${it.qty||1}</td><td style="text-align:right">${fmtPrice((it.amount||0)*(it.qty||1))}</td></tr>`
+  ).join("");
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    body{font-family:monospace;font-size:13px;width:300px;margin:0 auto;padding:10px}
+    h2{text-align:center;font-size:16px;margin:4px 0}
+    p{text-align:center;margin:2px 0;font-size:11px}
+    table{width:100%;border-collapse:collapse;margin:8px 0}
+    td{padding:3px 2px;border-bottom:1px dashed #ccc}
+    .total{font-size:18px;font-weight:bold;text-align:center;margin:8px 0;border-top:2px solid #000;padding-top:6px}
+    .thanks{text-align:center;font-size:11px;margin-top:8px}
+    @media print{button{display:none}}
+  </style></head><body>
+    <h2>${shopName}</h2>
+    ${shopPhone?`<p>${shopPhone}</p>`:""}
+    <p>${new Date().toLocaleString("fr-FR")}</p>
+    <p>Ticket #${String(invoiceNum).slice(-6)}</p>
+    <hr/>
+    <table><thead><tr><th style="text-align:left">Article</th><th>Qté</th><th style="text-align:right">Prix</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="total">TOTAL: ${fmtPrice(total)}</div>
+    <div class="thanks">Merci de votre visite !</div>
+    <br/><button onclick="window.print();window.close()">🖨️ Imprimer</button>
+  </body></html>`);
+  win.document.close();
+  setTimeout(() => { try { win.print(); } catch(_) {} }, 400);
+}
+
+async function printViaBLE(shopName, shopPhone, items, total, invoiceNum) {
+  if (!printer.connected) throw new Error("Imprimante non connectée");
+  const data = escPos(shopName, shopPhone, items, total, invoiceNum);
+  await printer.print(data);
+  return true;
+}
+
+function BLEStatus({ T }) {
+  const [status, setStatus] = useState({ status: "disconnected" });
+  const [connecting, setConnecting] = useState(false);
+  const hasSaved = !!printer.savedDeviceId;
+  useEffect(() => {
+    const unsub = printer.subscribe(s => { setStatus(s); });
+    // Tentative de reconnexion auto au montage si appareil mémorisé
+    if (printer.savedDeviceId && !printer.connected) {
+      printer.reconnect().catch(() => {});
+    }
+    return unsub;
+  }, []);
+  const connect = async () => {
+    setConnecting(true);
+    try { await printer.connect(); }
+    catch(e) { setStatus({ status: "error", message: e.message }); }
+    setConnecting(false);
+  };
+  const reconnect = async () => {
+    setConnecting(true);
+    try { await printer.reconnect(); }
+    catch(e) { setStatus({ status: "error", message: e.message }); }
+    setConnecting(false);
+  };
+  const isConnected = status.status === "connected";
+  const savedName = printer.savedDeviceName;
+  return (
+    <div style={{ background: T.surface, borderRadius: 12, padding: 10, marginBottom: 12, border: `1px solid ${isConnected ? T.green : T.red}` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{fontSize:12}}>{isConnected ? `🖨️ ${status.name || savedName || "Imprimante"}` : savedName ? `❌ ${savedName}` : "❌ Imprimante déconnectée"}</span>
+        <div style={{display:"flex", gap:6}}>
+          {!isConnected && hasSaved && (
+            <button onClick={reconnect} disabled={connecting} style={{ background: T.btnBlue.bg, borderRadius: 8, padding: "5px 10px", fontSize: 11, color: T.blue }}>
+              {connecting ? "..." : "🔄 Reconnecter"}
+            </button>
+          )}
+          {!isConnected && (
+            <button onClick={connect} disabled={connecting} style={{ background: T.btnGreen.bg, borderRadius: 8, padding: "5px 10px", fontSize: 11, color: T.green }}>
+              {connecting ? "..." : "🔌 Chercher"}
+            </button>
+          )}
+          {isConnected && (
+            <button onClick={()=>printer.disconnect()} style={{ background: T.btnRed.bg, borderRadius: 8, padding: "4px 10px", fontSize: 10, color: T.red }}>Déco</button>
+          )}
+          {hasSaved && !isConnected && (
+            <button onClick={()=>{printer.forgetDevice(); setStatus({status:"disconnected"});}} style={{ background: "transparent", border:`1px solid ${T.border}`, borderRadius: 8, padding: "4px 8px", fontSize: 10, color: T.textMute }}>🗑️</button>
+          )}
+        </div>
+      </div>
+      {status.message && !isConnected && <div style={{fontSize:10, color:T.textMute, marginTop:4}}>{status.message}</div>}
+    </div>
+  );
+}
+
+function VenteRapide({ T, addSale, flashMsg }) {
+  const [montant, setMontant] = useState("");
+  const [label, setLabel] = useState("");
+  const valider = () => { if(!montant) { flashMsg("Entrez un montant"); return; } addSale([{ label: label || "Vente", amount: parseInt(montant), qty: 1 }], parseInt(montant), true); setMontant(""); setLabel(""); };
+  return (<div style={{padding:12}}><input placeholder="Libellé" value={label} onChange={e=>setLabel(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:10, color:T.text}} /><input placeholder="Montant" value={montant} onChange={e=>setMontant(e.target.value.replace(/\D/g,""))} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:10, color:T.text}} /><button onClick={valider} style={{width:"100%", background:T.green, borderRadius:12, padding:12, color:T.bg}}>Valider</button></div>);
+}
+
+function CommandeQueue({ T, queue, onLoad, selectedId }) {
+  if (queue.length === 0) return (<div style={{textAlign:"center", padding:40, color:T.textMute}}>⏳ Aucune commande en attente</div>);
+  return (<div>{queue.map((cmd, idx) => (<div key={cmd.id} onClick={() => onLoad(cmd)} style={{ background: selectedId === cmd.id ? T.btnGreen.bg : T.surface, border: `2px solid ${selectedId === cmd.id ? T.green : T.border}`, borderRadius: 12, padding: 12, marginBottom: 8, cursor: "pointer" }}>
+    <div style={{display:"flex", justifyContent:"space-between"}}><span style={{fontWeight:700}}>#{String(cmd.id).slice(-4)}</span><span style={{color:T.accent}}>{fmtPrice(cmd.total)}</span></div>
+    <div style={{fontSize:11, color:T.textMute}}>{(cmd.items||[]).length} article(s)</div>
+    {cmd.note && <div style={{fontSize:10, marginTop:4, color:T.textSub}}>💬 {cmd.note}</div>}
+  </div>))}</div>);
+}
+
+function PanierContent({ T, items, setItems, total, addSale, flashMsg, useBLE, posMode, sendToQueue, selectedCommande, markCommandeDone }) {
+  const [recu, setRecu] = useState("");
+  const [vocalOn, setVocalOn] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const vocalRef = useRef(null);
+  const vocalSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const monnaie = recu !== "" ? parseInt(recu) - total : null;
+  const noteInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!vocalSupported) return;
+    const v = new window.VocalCaissier({
+      onMontant: (m) => { setRecu(String(m)); v.speak(`Reçu ${new Intl.NumberFormat('fr-FR').format(m)} francs.`); },
+      onValider: () => { if (items.length) { addSale(items, total, false); v.speak("Commande validée."); setRecu(""); } else v.speak("Panier vide."); },
+      onAnnuler: () => { setItems([]); setRecu(""); v.speak("Vente annulée."); },
+      onTotal: () => { const r = parseInt(recu)||0; v.announceTotal(total, r); },
+      onMonnaie: () => { const r = parseInt(recu)||0; if (!r) { v.speak("Saisissez le montant reçu."); return; } const m = r - total; v.speak(m >= 0 ? `Monnaie: ${new Intl.NumberFormat('fr-FR').format(m)} F.` : "Montant insuffisant."); },
+      onTranscript: ({ final }) => setTranscript(final),
+    });
+    vocalRef.current = v;
+    return () => v.stop();
+  }, []);
+
+  useEffect(() => {
+    const v = vocalRef.current;
+    if (!v) return;
+    v.onTotal = () => { const r = parseInt(recu)||0; v.announceTotal(total, r); };
+    v.onValider = () => { if (items.length) { addSale(items, total, false); setRecu(""); } };
+  }, [total, recu, items]);
+
+  const toggleVocal = () => { const v = vocalRef.current; if (!v) return; if (vocalOn) { v.stop(); setVocalOn(false); } else { v.start(); setVocalOn(true); } };
+  const cartTotal = items.reduce((s,i)=>s+(i.qty||1),0);
+  
+  const handleSendToQueue = () => {
+    if(!items.length){ flashMsg("Panier vide"); return; }
+    const note = noteInputRef.current?.value || "";
+    sendToQueue(items, total, note);
+    if(noteInputRef.current) noteInputRef.current.value = "";
+  };
+  
+  return (<div style={{display:"flex", flexDirection:"column", height:"100%"}}>
+    <div style={{padding:12, borderBottom:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between"}}><span>🛒 Panier ({cartTotal})</span><button onClick={()=>setItems([])} style={{color:T.red, background:"transparent", border:"none"}}>Tout vider</button></div>
+    {vocalSupported && (<div style={{padding:"0 12px"}}><button onClick={toggleVocal} style={{background:vocalOn?T.green:T.surface2, borderRadius:20, padding:"4px 12px", fontSize:12}}>{vocalOn ? "🎙️ Micro actif" : "🎤 Activer vocal"}</button>{transcript && <div style={{fontSize:10, marginTop:4, color:T.textMute}}>🗣️ {transcript}</div>}</div>)}
+    <div style={{flex:1, overflowY:"auto", padding:8}}>{items.map(it => (<div key={it.id} style={{background:T.surface2, borderRadius:8, padding:8, marginBottom:6}}><div style={{display:"flex", justifyContent:"space-between"}}><span>{it.label}</span><span>{fmtPrice(it.amount*it.qty)}</span></div><div style={{display:"flex", justifyContent:"space-between", marginTop:4}}><div><button onClick={()=>setItems(items.map(i=>i.id===it.id?{...i, qty:Math.max(1,(i.qty||1)-1)}:i))} style={{background:T.bg, border:"none", width:26, borderRadius:4}}>-</button> {it.qty} <button onClick={()=>setItems(items.map(i=>i.id===it.id?{...i, qty:(i.qty||1)+1}:i))} style={{background:T.bg, border:"none", width:26, borderRadius:4}}>+</button></div><button onClick={()=>setItems(items.filter(i=>i.id!==it.id))} style={{background:"transparent", border:"none", color:T.red}}>🗑️</button></div></div>))}</div>
+    <div style={{padding:12, borderTop:`1px solid ${T.border}`}}>
+      <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:18, fontWeight:800}}><span>TOTAL</span><span>{fmtPrice(total)}</span></div>
+      <div style={{marginBottom:8}}><input type="number" placeholder="Montant reçu (F)" value={recu} onChange={e=>setRecu(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, color:T.text}} /></div>
+      {recu !== "" && monnaie !== null && (<div style={{padding:8, borderRadius:8, marginBottom:8, background: monnaie>=0 ? T.btnGreen.bg : T.btnRed.bg, textAlign:"center"}}><span style={{fontWeight:700}}>{monnaie>=0 ? "Monnaie à rendre:" : "Manque:"}</span> <span style={{fontSize:18, fontWeight:800}}>{fmtPrice(Math.abs(monnaie))}</span></div>)}
+      {posMode === "VENDEUR" ? (<><input placeholder="Note pour le caissier (optionnel)" ref={noteInputRef} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:8, color:T.text}} /><button onClick={handleSendToQueue} style={{width:"100%", background:T.orange, borderRadius:12, padding:12, fontWeight:700, color:T.bg, display:"flex", alignItems:"center", justifyContent:"center", gap:8}}>📤 Envoyer au caissier</button></>) : (<><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.green, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>🖨️ Valider & Imprimer</button><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.blue, borderRadius:12, padding:12, fontWeight:700, color:T.bg}}>✅ Valider sans ticket</button></>)}
+    </div>
+  </div>);
+}
+
+function UsersManagement({ T, shopId, flashMsg }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [userPin, setUserPin] = useState("");
+  const [userRole, setUserRole] = useState("VENDEUR");
+
+  useEffect(() => {
+    if (!db || !shopId) { setLoading(false); return; }
+    const unsubscribe = db.collection("shops").doc(shopId).collection("users").onSnapshot(snap => {
+      const list = []; snap.forEach(doc => { if (doc.id !== "_init") list.push({ id: doc.id, ...doc.data() }); });
+      setUsers(list); setLoading(false);
+    }, err => { console.warn(err); setLoading(false); });
+    return () => unsubscribe();
+  }, [shopId]);
+
+  const addUser = async () => {
+    if (!userName.trim()) { flashMsg("Nom requis"); return; }
+    if (!userPin || userPin.length !== 4) { flashMsg("PIN à 4 chiffres requis"); return; }
+    try {
+      await db.collection("shops").doc(shopId).collection("users").add({ name: userName.trim(), pin: btoa(userPin), role: userRole, createdAt: Date.now() });
+      flashMsg(`✅ ${userName} ajouté`);
+      setShowForm(false); setUserName(""); setUserPin("");
+    } catch(e) { flashMsg("❌ Erreur"); }
+  };
+
+  const deleteUser = async (user) => { if(confirm(`Supprimer ${user.name} ?`)) { await db.collection("shops").doc(shopId).collection("users").doc(user.id).delete(); flashMsg(`🗑️ ${user.name} supprimé`); } };
+  if (loading) return <div className="spin" style={{margin:"20px auto"}}></div>;
+  return (<div><button onClick={()=>setShowForm(true)} style={{background:T.green, borderRadius:12, padding:12, marginBottom:12, width:"100%", fontWeight:700, color:T.bg}}>+ Ajouter</button>
+    {users.map(u => (<div key={u.id} style={{background:T.surface, borderRadius:12, padding:12, marginBottom:8, display:"flex", justifyContent:"space-between"}}><div><div style={{fontWeight:700}}>{u.name}</div><div style={{fontSize:11}}>{u.role === "VENDEUR" ? "🧑‍💼 Vendeur" : "💰 Caissier"}</div></div><button onClick={()=>deleteUser(u)} style={{background:T.btnRed.bg, borderRadius:8, padding:"8px 12px", color:T.red}}>🗑️</button></div>))}
+    {showForm && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.95)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000}}><div style={{background:T.surface, borderRadius:24, padding:24, width:"90%", maxWidth:360}}><div style={{fontSize:20, fontWeight:800, marginBottom:16}}>➕ Ajouter</div><input placeholder="Nom" value={userName} onChange={e=>setUserName(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:12}} /><input placeholder="PIN (4 chiffres)" value={userPin} onChange={e=>setUserPin(e.target.value.replace(/\D/g,"").slice(0,4))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:12}} /><select value={userRole} onChange={e=>setUserRole(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:16}}><option value="VENDEUR">Vendeur</option><option value="CAISSIER">Caissier</option></select><div style={{display:"flex", gap:10}}><button onClick={()=>setShowForm(false)} style={{flex:1, background:T.surface2, borderRadius:12, padding:12}}>Annuler</button><button onClick={addUser} style={{flex:1, background:T.accent, borderRadius:12, padding:12, fontWeight:700}}>Ajouter</button></div></div></div>)}
+  </div>);
+}
+
+function OwnerContent({ T, shopId, products, setProducts, sales, stockMovements, updateStock, flashMsg }) {
+  const [tab, setTab] = useState("stats");
+  const [showForm, setShowForm] = useState(false);
+  const [editProd, setEditProd] = useState(null);
+  const [pName, setPName] = useState("");
+  const [pPrice, setPPrice] = useState("");
+  const [pStock, setPStock] = useState("");
+  const [pStockUnlimited, setPStockUnlimited] = useState(false);
+  const [showPinForm, setShowPinForm] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [newPinConfirm, setNewPinConfirm] = useState("");
+
+  const today = new Date().toISOString().slice(0,10);
+  const todaySales = (sales || []).filter(s=>s.date===today);
+  const caToday = todaySales.filter(s=>!s.cancelled).reduce((a,b)=>a+(b.total||0),0);
+  const lowStock = (products || []).filter(p=>p.stock !== undefined && p.stock !== null && p.stock !== -1 && p.stock <= 5).length;
+
+  const addOrUpdate = () => {
+    if(!pName.trim()) { flashMsg("Nom requis"); return; }
+    const price = parseInt(pPrice);
+    if(!price) { flashMsg("Prix invalide"); return; }
+    const stock = pStockUnlimited ? -1 : (parseInt(pStock) || 0);
+    if(editProd) {
+      const updated = products.map(p=>p.id===editProd.id?{...p, name:pName.trim(), price, stock}:p);
+      setProducts(updated);
+      if(db) db.collection("shops").doc(shopId).collection("products").doc(editProd.id).update({name:pName.trim(), price, stock});
+      flashMsg("Produit modifié");
+    } else {
+      const newProd = { id: Date.now().toString(36), name:pName.trim(), price, stock, active:true };
+      setProducts([...products, newProd]);
+      if(db) db.collection("shops").doc(shopId).collection("products").doc(newProd.id).set(newProd);
+      flashMsg("Produit ajouté");
+    }
+    setShowForm(false);
+  };
+
+  const deleteProd = (p) => { if(confirm(`Supprimer ${p.name} ?`)) { setProducts(products.filter(pr=>pr.id!==p.id)); if(db) db.collection("shops").doc(shopId).collection("products").doc(p.id).delete(); flashMsg("Produit supprimé"); } };
+  const updateAdminPin = async (newPinCode) => { if(db) await db.collection("shops").doc(shopId).update({ adminPin: btoa(newPinCode) }); flashMsg("PIN modifié"); };
+  const handlePinChange = () => { if(newPin.length !== 4) { flashMsg("PIN 4 chiffres"); return; } if(newPin !== newPinConfirm) { flashMsg("PIN non identiques"); return; } updateAdminPin(newPin); setShowPinForm(false); };
+
+  return (<div style={{flex:1, overflowY:"auto", padding:12}}>
+    <div style={{display:"flex", gap:6, marginBottom:16, flexWrap:"wrap"}}>
+      <button onClick={()=>setTab("stats")} style={{background:tab==="stats"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>📊 Stats</button>
+      <button onClick={()=>setTab("products")} style={{background:tab==="products"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>📦 Produits</button>
+      <button onClick={()=>setTab("stock")} style={{background:tab==="stock"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>📊 Stock</button>
+      <button onClick={()=>setTab("sales")} style={{background:tab==="sales"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>🧾 Ventes</button>
+      <button onClick={()=>setTab("users")} style={{background:tab==="users"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>👥 Utilisateurs</button>
+      <button onClick={()=>setTab("settings")} style={{background:tab==="settings"?T.accent:T.surface, borderRadius:12, padding:"8px 14px"}}>⚙️ Param.</button>
+    </div>
+    {tab === "stats" && (<div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8}}><div style={{background:T.surface, borderRadius:16, padding:14}}><div style={{fontSize:11}}>CA Aujourd'hui</div><div style={{fontSize:24, fontWeight:800, color:T.green}}>{fmtPrice(caToday)}</div></div><div style={{background:T.surface, borderRadius:16, padding:14}}><div style={{fontSize:11}}>Ventes</div><div style={{fontSize:24, fontWeight:800, color:T.blue}}>{todaySales.filter(s=>!s.cancelled).length}</div></div><div style={{background:T.surface, borderRadius:16, padding:14}}><div style={{fontSize:11}}>Annulations</div><div style={{fontSize:24, fontWeight:800, color:T.red}}>{todaySales.filter(s=>s.cancelled).length}</div></div><div style={{background:T.surface, borderRadius:16, padding:14}}><div style={{fontSize:11}}>Stock bas</div><div style={{fontSize:24, fontWeight:800, color:T.orange}}>{lowStock}</div></div></div>)}
+    {tab === "products" && (<><button onClick={()=>{setEditProd(null); setPName(""); setPPrice(""); setPStock(""); setPStockUnlimited(false); setShowForm(true);}} style={{background:T.green, borderRadius:12, padding:12, marginBottom:12, width:"100%", color:T.bg}}>+ Nouveau produit</button>{products.map(p=>(<div key={p.id} style={{background:T.surface, borderRadius:12, padding:12, marginBottom:8, display:"flex", justifyContent:"space-between"}}><div><div>{p.name}</div><div>{fmtPrice(p.price)}</div><div style={{fontSize:10}}>{p.stock===-1?"Illimité":`Stock: ${p.stock}`}</div></div><div><button onClick={()=>{setEditProd(p); setPName(p.name); setPPrice(String(p.price)); setPStock(p.stock===-1?"":String(p.stock)); setPStockUnlimited(p.stock===-1); setShowForm(true);}} style={{background:T.btnBlue.bg, borderRadius:8, padding:"4px 10px", marginRight:6}}>✏️</button><button onClick={()=>deleteProd(p)} style={{background:T.btnRed.bg, borderRadius:8, padding:"4px 10px"}}>🗑️</button></div></div>))}</>)}
+    {tab === "stock" && (<div>{products.filter(p=>p.active!==false).map(p=>(<div key={p.id} style={{background:T.surface, borderRadius:12, padding:12, marginBottom:8}}><div>{p.name} - {fmtPrice(p.price)}</div><div style={{display:"flex", justifyContent:"space-between", marginTop:6}}><span>Stock: {p.stock===-1?"Illimité":p.stock}</span>{p.stock!==-1 && <button onClick={()=>{ const qty=prompt("Quantité:"); if(qty) updateStock(p.id, parseInt(qty), parseInt(qty)>0?"entree":"sortie", "Ajustement"); }} style={{background:T.btnGreen.bg, borderRadius:8, padding:"4px 10px"}}>Ajuster</button>}</div></div>))}</div>)}
+    {tab === "sales" && (sales.sort((a,b)=>b.timestamp - a.timestamp).map(s=>(<div key={s.id} style={{background:s.cancelled?T.btnRed.bg:T.surface, borderRadius:12, padding:12, marginBottom:8}}><div>{new Date(s.timestamp).toLocaleTimeString()} - {fmtPrice(s.total)}</div>{s.cancelled && <div style={{fontSize:10, color:T.red}}>ANNULÉ: {s.cancelRaison}</div>}</div>)))}
+    {tab === "users" && <UsersManagement T={T} shopId={shopId} flashMsg={flashMsg} />}
+    {tab === "settings" && (<div><button onClick={()=>setShowPinForm(true)} style={{background:T.btnBlue.bg, borderRadius:12, padding:12, width:"100%"}}>🔐 Changer PIN Admin</button></div>)}
+    {showForm && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000}}><div style={{background:T.surface, borderRadius:24, padding:20, width:"90%", maxWidth:360}}><div style={{fontSize:18, fontWeight:800}}>{editProd?"Modifier":"Nouveau produit"}</div><input placeholder="Nom" value={pName} onChange={e=>setPName(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, margin:"12px 0"}} /><input placeholder="Prix (F)" value={pPrice} onChange={e=>setPPrice(e.target.value.replace(/\D/g,""))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:12}} /><label><input type="checkbox" checked={pStockUnlimited} onChange={e=>setPStockUnlimited(e.target.checked)} /> Stock illimité</label>{!pStockUnlimited && <input placeholder="Stock" value={pStock} onChange={e=>setPStock(e.target.value.replace(/\D/g,""))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:12}} />}<div style={{display:"flex", gap:8}}><button onClick={()=>setShowForm(false)} style={{flex:1, background:T.surface2, borderRadius:12, padding:12}}>Annuler</button><button onClick={addOrUpdate} style={{flex:1, background:T.accent, borderRadius:12, padding:12}}>Enregistrer</button></div></div></div>)}
+    {showPinForm && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000}}><div style={{background:T.surface, borderRadius:24, padding:20, width:"90%", maxWidth:360}}><div style={{fontSize:18, fontWeight:800}}>🔐 Changer PIN Admin</div><input type="password" placeholder="Nouveau PIN (4 chiffres)" value={newPin} onChange={e=>setNewPin(e.target.value.replace(/\D/g,"").slice(0,4))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, margin:"12px 0"}} /><input type="password" placeholder="Confirmer" value={newPinConfirm} onChange={e=>setNewPinConfirm(e.target.value.replace(/\D/g,"").slice(0,4))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, marginBottom:12}} /><div style={{display:"flex", gap:8}}><button onClick={()=>setShowPinForm(false)} style={{flex:1, background:T.surface2, borderRadius:12, padding:12}}>Annuler</button><button onClick={handlePinChange} style={{flex:1, background:T.accent, borderRadius:12, padding:12}}>Modifier</button></div></div></div>)}
+  </div>);
+}
+
+function DevDashboard({ T, themeName, setThemeName, logout, flashMsg }) {
+  const [shops, setShops] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { if(!db) return; const unsub = db.collection("shops").onSnapshot(snap => { setShops(snap.docs.map(d=>({id:d.id, ...d.data()}))); setLoading(false); }); return unsub; }, []);
+  const updatePlan = async (shopId, plan) => { const now = Date.now(); await db.collection("shops").doc(shopId).update({ plan, subscriptionStart: now, subscriptionEnd: calculateEndDate(now, plan) }); flashMsg("Plan mis à jour"); };
+  const toggleActive = async (shop) => { await db.collection("shops").doc(shop.id).update({active:!shop.active}); flashMsg(shop.active?"Suspendu":"Activé"); };
+  return (<div style={{height:"100dvh", background:T.bg, display:"flex", flexDirection:"column"}}><div style={{background:T.header, padding:"8px 12px", display:"flex", justifyContent:"space-between"}}><div><div style={{fontSize:9}}>Développeur</div><div style={{fontWeight:800, color:T.purple}}>Gestion abonnements</div></div><div><button onClick={logout} style={{background:"transparent", border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 8px"}}>↩ Déco</button></div></div><div style={{flex:1, overflowY:"auto", padding:12}}>{loading?<div className="spin"></div>:shops.map(s=>(<div key={s.id} style={{background:T.surface, borderRadius:16, padding:16, marginBottom:12}}><div style={{fontWeight:700}}>{s.shopName}</div><div style={{fontSize:11}}>{s.ownerName} - {s.whatsapp}</div><div style={{marginTop:8, display:"flex", gap:8}}><select onChange={e=>updatePlan(s.id, e.target.value)} style={{background:T.inputBg, borderRadius:8, padding:6}}><option value="">Plan: {s.plan||"mensuel"}</option><option value="mensuel">Mensuel</option><option value="trimestriel">Trimestriel</option><option value="annuel">Annuel</option></select><button onClick={()=>toggleActive(s)} style={{background:s.active?T.btnRed.bg:T.btnGreen.bg, borderRadius:8, padding:"6px 12px", color:s.active?T.red:T.green}}>{s.active?"Suspendre":"Activer"}</button><button onClick={()=>window.open(`https://wa.me/${s.whatsapp?.replace(/\D/g,"")}?text=${encodeURIComponent("Rappel abonnement")}`)} style={{background:T.btnBlue.bg, borderRadius:8, padding:"6px 12px"}}>📱</button></div></div>))}</div></div>);
+}
+
+function MainApp({ session, T, themeName, setThemeName, logout, flashMsg }) {
+  const { data: products, loading: productsLoading } = useRealtimeCollection(session.shopId, "products", []);
+  const { data: sales } = useRealtimeCollection(session.shopId, "sales", []);
+  const { data: stockMovements } = useRealtimeCollection(session.shopId, "stock_movements", []);
+  
+  const [items, setItems] = useState([]);
+  const [ownerMode, setOwnerMode] = useState(false);
+  const [pinModal, setPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
+  const [pinShake, setPinShake] = useState(false);
+  const [useBLE, setUseBLE] = useState(true);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [posMode, setPosMode] = useState(() => localStorage.getItem(`posmode_${session.shopId}`) || "VENDEUR");
+  const [commandesQueue, setCommandesQueue] = useState([]);
+  const [selectedCommande, setSelectedCommande] = useState(null);
+  const [view, setView] = useState("catalog");
+  const [search, setSearch] = useState("");
+  const [manualLabel, setManualLabel] = useState("");
+  const [manualAmount, setManualAmount] = useState("");
+  const [cancelModal, setCancelModal] = useState(null);
+  const [cancelRaison, setCancelRaison] = useState("");
+  const [toast, setToast] = useState(null);
+  
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+  const total = items.reduce((s,i)=>s + (i.amount || 0) * (i.qty || 1), 0);
+  
+  useEffect(() => { localStorage.setItem(`posmode_${session.shopId}`, posMode); }, [posMode, session.shopId]);
+  
+  // Écoute temps réel de la file d'attente des commandes
+  useEffect(() => {
+    if (!db || !session.shopId) return;
+    console.log("[CommandeQueue] Démarrage écoute temps réel");
+    const unsubscribe = db.collection("shops").doc(session.shopId).collection("commandes_queue")
+      .where("status", "==", "pending")
+      .onSnapshot(snap => {
+        const orders = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+        setCommandesQueue(orders);
+        if(orders.length > 0) console.log(`[CommandeQueue] ${orders.length} commande(s) en attente`);
+      }, err => {
+        console.error("[CommandeQueue] Erreur:", err.code, err.message);
+        // Si erreur de permission, on utilise le stockage local
+        if(err.code === "permission-denied") {
+          const localQueue = OfflineStore.get(session.shopId, "commandes_queue");
+          setCommandesQueue(localQueue);
+        }
+      });
+    return () => unsubscribe();
+  }, [session.shopId]);
+  
+  const updateStock = async (productId, quantity, type, reason) => {
+    const product = products.find(p => p.id === productId);
+    if (!product || product.stock === undefined || product.stock === null || product.stock === -1) return;
+    const newStock = Math.max(0, (product.stock || 0) + quantity);
+    if (db) { try { await db.collection("shops").doc(session.shopId).collection("products").doc(productId).update({ stock: newStock }); } catch(e) {} }
+    const movement = { id: Date.now().toString(36), productId, productName: product.name, quantity, type, reason, timestamp: Date.now() };
+    if (db) { try { await db.collection("shops").doc(session.shopId).collection("stock_movements").doc(movement.id).set(movement); } catch(e) {} }
+  };
+  
+  const addSale = async (saleItems, saleTotal, print = true) => {
+    for (const item of saleItems) {
+      const product = products.find(p => p.id === item.productId);
+      if (product && product.stock !== undefined && product.stock !== null && product.stock !== -1) {
+        await updateStock(item.productId, -(item.qty || 1), "sortie", `Vente #${Date.now()}`);
+      }
+    }
+    const invoiceNum = Date.now();
+    const newSale = { id: Date.now().toString(36), date: new Date().toISOString().slice(0,10), timestamp: Date.now(), items: saleItems, total: saleTotal, invoiceNum, cancelled: false };
+    if (db) { try { await db.collection("shops").doc(session.shopId).collection("sales").doc(newSale.id).set(newSale); } catch(e) {} }
+    if (print) {
+      if (useBLE && printer.connected) {
+        try {
+          await printViaBLE(session.shopName, session.shopPhone || "", saleItems, saleTotal, invoiceNum);
+          showToast(`🖨️ Ticket imprimé !`);
+        } catch(e) {
+          showToast(`⚠️ BLE échoué, impression navigateur`);
+          printFallback(session.shopName, session.shopPhone || "", saleItems, saleTotal, invoiceNum);
+        }
+      } else {
+        printFallback(session.shopName, session.shopPhone || "", saleItems, saleTotal, invoiceNum);
+      }
+    }
+    showToast(`✅ Vente ${fmtPrice(saleTotal)}`);
+    setItems([]);
+  };
+  
+  const cancelSale = async (saleId, raison) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (sale && !sale.cancelled) {
+      for (const item of sale.items) { if (item.productId) await updateStock(item.productId, item.qty || 1, "entree", `Annulation`); }
+    }
+    if (db) { try { await db.collection("shops").doc(session.shopId).collection("sales").doc(saleId).update({ cancelled: true, cancelRaison: raison, cancelledAt: Date.now() }); } catch(e) {} }
+    showToast(`🗑️ Vente annulée`);
+  };
+  
+  // Fonction d'envoi à la file d'attente avec fallback local
+  const sendToQueue = async (qItems, qTotal, note = "") => {
+    const order = { items: qItems, total: qTotal, note, timestamp: Date.now(), status: "pending" };
+    try {
+      if (db) {
+        const docRef = await db.collection("shops").doc(session.shopId).collection("commandes_queue").add(order);
+        console.log("[CommandeQueue] Commande envoyée avec succès:", docRef.id);
+        showToast("📤 Commande envoyée au caissier !");
+      } else {
+        // Mode hors-ligne
+        const tempId = Date.now().toString(36);
+        const localOrder = { ...order, id: tempId };
+        const currentQueue = OfflineStore.get(session.shopId, "commandes_queue");
+        OfflineStore.set(session.shopId, "commandes_queue", [localOrder, ...currentQueue]);
+        setCommandesQueue(prev => [localOrder, ...prev]);
+        showToast("📤 Commande envoyée (mode hors-ligne)");
+      }
+      setItems([]);
+    } catch(err) {
+      console.error("[CommandeQueue] Erreur envoi:", err);
+      // Fallback: stockage local
+      const tempId = Date.now().toString(36);
+      const localOrder = { ...order, id: tempId };
+      const currentQueue = OfflineStore.get(session.shopId, "commandes_queue");
+      OfflineStore.set(session.shopId, "commandes_queue", [localOrder, ...currentQueue]);
+      setCommandesQueue(prev => [localOrder, ...prev]);
+      showToast("📤 Commande envoyée (mode dégradé)");
+      setItems([]);
+    }
+  };
+  
+  const loadCommande = (commande) => { setItems(commande.items || []); setSelectedCommande(commande); setMobileCartOpen(true); showToast(`📋 Commande chargée: ${commande.items?.length} article(s)`); };
+  
+  const markCommandeDone = async (commandeId) => {
+    try {
+      if (db) {
+        await db.collection("shops").doc(session.shopId).collection("commandes_queue").doc(commandeId).update({ status: "done", doneAt: Date.now() });
+      } else {
+        // Mode hors-ligne: mise à jour locale
+        const currentQueue = OfflineStore.get(session.shopId, "commandes_queue");
+        const updatedQueue = currentQueue.filter(c => c.id !== commandeId);
+        OfflineStore.set(session.shopId, "commandes_queue", updatedQueue);
+        setCommandesQueue(prev => prev.filter(c => c.id !== commandeId));
+      }
+      setSelectedCommande(null);
+      showToast("✅ Commande terminée");
+    } catch(err) {
+      console.error("Erreur marquage done:", err);
+    }
+  };
+  
+  const addProductToCart = (p) => { if (p.stock === 0) { showToast(`⚠️ ${p.name} rupture`); return; } const exist = items.find(i=>i.productId===p.id); if(exist) setItems(items.map(i=>i.productId===p.id?{...i, qty:(i.qty||1)+1}:i)); else setItems([...items, {id:Date.now(), productId:p.id, label:p.name, amount:p.price, qty:1}]); showToast(`➕ ${p.name}`); };
+  const addManual = () => { if(!manualLabel.trim() || !manualAmount) return; setItems([...items, {id:Date.now(), label:manualLabel.trim(), amount:parseInt(manualAmount), qty:1}]); setManualLabel(""); setManualAmount(""); };
+  const verifyAdminPin = () => { const expectedPin = session.adminPin ? atob(session.adminPin) : "0000"; if (pinInput === expectedPin) { setPinModal(false); setPinInput(""); setOwnerMode(true); showToast("Mode admin activé"); } else { setPinError(true); setPinShake(true); setTimeout(() => { setPinShake(false); setPinInput(""); setPinError(false); }, 700); } };
+  
+  const todaySales = (sales || []).filter(s => s.date === new Date().toISOString().slice(0,10) && !s.cancelled);
+  const filtered = (products || []).filter(p => p && p.active !== false && p.name && p.name.toLowerCase().includes(search.toLowerCase()));
+  
+  if (productsLoading) return (<div style={{height:"100dvh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center"}}><div className="spin" style={{width:40,height:40,border:`3px solid ${T.border}`,borderTopColor:T.accent,borderRadius:"50%"}}></div></div>);
+  
+  return (<div style={{height:"100dvh", background:T.bg, display:"flex", flexDirection:"column"}}>
+    {toast && <Toast message={toast} onClose={()=>setToast(null)} />}
+    <ConnectionStatus T={T} />
+    <SubscriptionBanner T={T} shopId={session.shopId} />
+    {pinModal && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.95)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000}}><div style={{background:T.surface, borderRadius:32, padding:24, width:"90%", maxWidth:360, textAlign:"center"}}><div style={{fontSize:48}}>👑</div><div style={{display:"flex", gap:12, justifyContent:"center", marginBottom:20, animation: pinShake ? "shake 0.35s ease" : "none"}}>{Array(4).fill(0).map((_,i)=><div key={i} style={{width:16,height:16,borderRadius:"50%", background: i < pinInput.length ? (pinError ? T.red : T.accent) : T.border}} />)}</div><div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8}}>{[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>(<button key={i} onClick={()=>{ if(d==="⌫") setPinInput(p=>p.slice(0,-1)); else if(d!=="") setPinInput(p=>p.length<4 ? p+d : p); }} style={{background:d===""?"transparent":T.surface2, borderRadius:12, height:55, fontSize:22}}>{d}</button>))}</div><button onClick={verifyAdminPin} style={{marginTop:16, background:T.accent, borderRadius:12, padding:12, width:"100%"}}>Valider</button><button onClick={()=>{setPinModal(false); setPinInput("");}} style={{marginTop:8, background:"transparent", border:"none"}}>Annuler</button></div></div>)}
+    <div style={{background:T.header, padding:"8px 12px", borderBottom:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0}}>
+      <div><div style={{fontSize:10, color:T.textMute}}>{session.shopName}</div><div style={{fontFamily:"'Outfit'", fontWeight:800, color:T.accent}}>Caisse Pro</div></div>
+      <div style={{display:"flex", gap:6}}><div className="hdr-themes" style={{display:"flex", gap:4}}>{Object.values(THEMES).map(t=><button key={t.id} onClick={()=>setThemeName(t.id)} style={{background:themeName===t.id?T.accent:"transparent", border:"none", borderRadius:16, width:28, height:28}}>{t.label}</button>)}</div>
+        <div style={{display:"flex", background:T.surface2, borderRadius:20, padding:3, position:"relative"}}>
+          <button onClick={()=>setPosMode("VENDEUR")} style={{background:posMode==="VENDEUR"?T.orange:"transparent", borderRadius:16, padding:"5px 9px", fontSize:12}}>🧑‍💼 Vendeur</button>
+          <button onClick={()=>setPosMode("CAISSIER")} style={{position:"relative", background:posMode==="CAISSIER"?T.green:"transparent", borderRadius:16, padding:"5px 9px", fontSize:12}}>
+            💰 Caissier
+            {commandesQueue.length > 0 && <span style={{position:"absolute", top:-6, right:-8, background:T.red, borderRadius:"50%", width:18, height:18, fontSize:10, display:"flex", alignItems:"center", justifyContent:"center"}}>{commandesQueue.length}</span>}
+          </button>
+        </div>
+        {!ownerMode ? <button onClick={()=>setPinModal(true)} style={{background:T.btnBlue.bg, borderRadius:8, padding:"6px 10px"}}>👑 Admin</button> : <button onClick={()=>setOwnerMode(false)} style={{background:T.btnRed.bg, borderRadius:8, padding:"6px 10px"}}>🔒 Quitter</button>}
+        <button onClick={logout} style={{background:"transparent", border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 8px"}}>↩</button>
+      </div>
+    </div>
+    <div className="desktop-grid" style={{flex:1, overflow:"hidden"}}>
+      <div className="desktop-main" style={{flex:1, overflowY:"auto", padding:12}}>
+        <BLEStatus T={T} />
+        <div style={{display:"flex", gap:6, marginBottom:12}}><button onClick={()=>setUseBLE(true)} style={{flex:1, background:useBLE?T.accent:T.surface, borderRadius:12, padding:6}}>🖨️ BLE 80mm</button><button onClick={()=>setUseBLE(false)} style={{flex:1, background:!useBLE?T.accent:T.surface, borderRadius:12, padding:6}}>🖥️ Navigateur</button></div>
+        <>
+          {posMode === "CAISSIER" && (
+            <>
+              {commandesQueue.length > 0 && <div className="command-badge" style={{marginBottom:12, textAlign:"center"}}>📋 {commandesQueue.length} commande(s) en attente</div>}
+              <CommandeQueue T={T} queue={commandesQueue} onLoad={loadCommande} selectedId={selectedCommande?.id} />
+              <div style={{height:1, background:T.border, margin:"12px 0"}} />
+            </>
+          )}
+          <div style={{display:"flex", gap:6, marginBottom:12, overflowX:"auto"}}>
+            <button onClick={()=>setView("catalog")} style={{background:view==="catalog"?T.accent:T.surface, borderRadius:12, padding:"8px 10px"}}>📦 Catalogue</button>
+            <button onClick={()=>setView("manual")} style={{background:view==="manual"?T.accent:T.surface, borderRadius:12, padding:"8px 10px"}}>✏️ Manuel</button>
+            <button onClick={()=>setView("rapide")} style={{background:view==="rapide"?T.accent:T.surface, borderRadius:12, padding:"8px 10px"}}>⚡ Rapide</button>
+            <button onClick={()=>setView("annulations")} style={{background:view==="annulations"?T.red:T.surface, borderRadius:12, padding:"8px 10px"}}>🗑️ Annul.</button>
+          </div>
+          {view === "catalog" && (<><input placeholder="🔍 Rechercher" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:10, marginBottom:12}} /><div className="product-grid" style={{display:"grid", gap:8}}>{filtered.map(p => (<button key={p.id} onClick={()=>addProductToCart(p)} style={{background:T.surface, borderRadius:12, padding:10, textAlign:"left"}}><div>{p.name}</div><div style={{fontSize:11, color:T.accent}}>{fmtPrice(p.price)}</div>{p.stock !== undefined && p.stock !== -1 && <div style={{fontSize:9, color:p.stock<=5?T.red:T.textMute}}>Stock: {p.stock}</div>}</button>))}</div></>)}
+          {view === "manual" && (<div style={{background:T.surface, borderRadius:16, padding:16}}><input placeholder="Nom article" value={manualLabel} onChange={e=>setManualLabel(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:10, marginBottom:8}} /><input placeholder="Montant" value={manualAmount} onChange={e=>setManualAmount(e.target.value.replace(/\D/g,""))} style={{width:"100%", background:T.inputBg, borderRadius:12, padding:10, marginBottom:12}} /><button onClick={addManual} style={{background:T.accent, borderRadius:12, padding:12, width:"100%"}}>➕ Ajouter</button></div>)}
+          {view === "rapide" && <VenteRapide T={T} addSale={addSale} flashMsg={showToast} />}
+          {view === "annulations" && (<div>{todaySales.map(s=>(<div key={s.id} style={{background:T.surface, borderRadius:12, padding:12, marginBottom:8}}><div>{new Date(s.timestamp).toLocaleTimeString()} - {fmtPrice(s.total)}</div><button onClick={()=>setCancelModal(s)} style={{marginTop:8, background:T.btnRed.bg, borderRadius:8, padding:6, width:"100%"}}>🗑️ Annuler</button></div>))}</div>)}</>
+        <div style={{height:80}} />
+      </div>
+      <div className="desktop-sidebar" style={{background:T.surface, borderLeft:`1px solid ${T.border}`, display:"flex", flexDirection:"column", overflow:"hidden"}}>
+        <PanierContent T={T} items={items} setItems={setItems} total={total} addSale={addSale} flashMsg={showToast} useBLE={useBLE} posMode={posMode} sendToQueue={sendToQueue} selectedCommande={selectedCommande} markCommandeDone={markCommandeDone} />
+      </div>
+      <button className="mobile-cart-fab" onClick={()=>setMobileCartOpen(true)} style={{position:"fixed", bottom:24, right:20, background:items.length>0?T.accent:T.surface2, borderRadius:32, minWidth:64, height:64}}><span>🛒</span>{items.length>0 && <span>{items.reduce((s,i)=>s+(i.qty||1),0)}</span>}</button>
+      {mobileCartOpen && (<div className="mobile-cart-overlay" onClick={e=>{if(e.target===e.currentTarget) setMobileCartOpen(false);}} style={{position:"fixed", inset:0, background:"rgba(0,0,0,.55)", display:"flex", flexDirection:"column", justifyContent:"flex-end"}}><div style={{background:T.surface, borderRadius:"20px 20px 0 0", maxHeight:"82dvh", display:"flex", flexDirection:"column"}}><div style={{padding:"10px 16px", display:"flex", justifyContent:"space-between", borderBottom:`1px solid ${T.border}`}}><span>Panier</span><button onClick={()=>setMobileCartOpen(false)}>✕</button></div><PanierContent T={T} items={items} setItems={setItems} total={total} addSale={addSale} flashMsg={showToast} useBLE={useBLE} posMode={posMode} sendToQueue={sendToQueue} selectedCommande={selectedCommande} markCommandeDone={markCommandeDone} /></div></div>)}
+    </div>
+    {cancelModal && (<div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000}}><div style={{background:T.surface, borderRadius:24, padding:20, width:"90%"}}><div style={{fontSize:18, fontWeight:800}}>Annuler la vente</div><textarea placeholder="Motif" value={cancelRaison} onChange={e=>setCancelRaison(e.target.value)} rows="3" style={{width:"100%", background:T.inputBg, borderRadius:12, padding:12, margin:"12px 0"}} /><div style={{display:"flex", gap:8}}><button onClick={()=>{setCancelModal(null); setCancelRaison("");}} style={{flex:1, background:T.surface2, borderRadius:12, padding:12}}>Retour</button><button onClick={()=>{ if(cancelRaison.trim()){ cancelSale(cancelModal.id, cancelRaison); setCancelModal(null); setCancelRaison(""); } else showToast("Motif requis"); }} style={{flex:1, background:T.red, borderRadius:12, padding:12, color:"white"}}>Confirmer</button></div></div></div>)}
+    {ownerMode && (<OwnerContent T={T} shopId={session.shopId} products={products} setProducts={()=>{}} sales={sales} stockMovements={stockMovements} updateStock={updateStock} flashMsg={showToast} />)}
+  </div>);
+}
+
+function App() {
+  const [themeName, setThemeName] = useState(()=>localStorage.getItem("pos_theme")||"dark");
+  const T = THEMES[themeName];
+  const [session, setSession] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authShopName, setAuthShopName] = useState("");
+  const [authOwnerName, setAuthOwnerName] = useState("");
+  const [authWhatsapp, setAuthWhatsapp] = useState("");
+  const [authPhone, setAuthPhone] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authConfirm, setAuthConfirm] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [devMode, setDevMode] = useState(false);
+  const [devPin, setDevPin] = useState("");
+  const [toast, setToast] = useState(null);
+  const clickCountRef = useRef({ count: 0, timer: null });
+  
+  useEffect(()=>{ document.body.style.background = T.bg; localStorage.setItem("pos_theme", themeName); }, [themeName]);
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+  const handleLogoTripleClick = () => { const ref = clickCountRef.current; ref.count++; clearTimeout(ref.timer); if (ref.count >= 3) { ref.count = 0; setDevMode(true); } ref.timer = setTimeout(() => { ref.count = 0; }, 500); };
+  
+  const handleRegister = async () => {
+    if(!authShopName.trim() || !authOwnerName.trim() || !authWhatsapp.trim() || authPassword.length<4 || authPassword!==authConfirm) { setAuthError("Vérifiez les champs"); return; }
+    setAuthLoading(true);
+    try {
+      const existing = await db.collection("shops").where("shopName", "==", authShopName.trim()).get();
+      if(!existing.empty) throw new Error("Nom déjà utilisé");
+      const shopId = "shop_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
+      const now = Date.now();
+      await db.collection("shops").doc(shopId).set({ 
+        shopName: authShopName.trim(), ownerName: authOwnerName.trim(), whatsapp: authWhatsapp.trim(), phone: authPhone.trim(), 
+        password: btoa(authPassword), createdAt: now, active: true, plan: "mensuel", 
+        subscriptionStart: now, subscriptionEnd: calculateEndDate(now, "mensuel"),
+        adminPin: btoa("0000")
+      });
+      await db.collection("shops").doc(shopId).collection("products").doc("_init").set({init:true});
+      await db.collection("shops").doc(shopId).collection("sales").doc("_init").set({init:true});
+      await db.collection("shops").doc(shopId).collection("stock_movements").doc("_init").set({init:true});
+      showToast("Commerce créé ! Connectez-vous");
+      setAuthMode("login");
+    } catch(e) { setAuthError(e.message); showToast(e.message); }
+    setAuthLoading(false);
+  };
+
+  const handleLogin = async () => {
+    if(!authShopName.trim() || !authPassword) { setAuthError("Nom et mot de passe requis"); return; }
+    setAuthLoading(true);
+    try {
+      const query = await db.collection("shops").where("shopName", "==", authShopName.trim()).get();
+      if(query.empty) throw new Error("Commerce introuvable");
+      const doc = query.docs[0];
+      const data = doc.data();
+      if(btoa(authPassword) !== data.password) throw new Error("Mot de passe incorrect");
+      if(data.active === false) throw new Error("Compte désactivé");
+      setSession({ 
+        shopId: doc.id, shopName: data.shopName, shopPhone: data.phone || "", 
+        whatsapp: data.whatsapp, ownerName: data.ownerName, plan: data.plan || "mensuel", 
+        subscriptionEnd: data.subscriptionEnd, adminPin: data.adminPin || btoa("0000"), isDev: false 
+      });
+      showToast(`Bienvenue ${data.shopName}`);
+    } catch(e) { setAuthError(e.message); showToast(e.message); }
+    setAuthLoading(false);
+  };
+  
+  if (devMode) { return <DevDashboard T={T} themeName={themeName} setThemeName={setThemeName} logout={()=>setDevMode(false)} flashMsg={showToast} />; }
+  if(!session) return (<div style={{minHeight:"100dvh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", padding:16}}>{toast && <Toast message={toast} onClose={()=>setToast(null)} />}<div style={{maxWidth:420, width:"100%", background:T.surface, borderRadius:28, padding:"20px"}}><div style={{textAlign:"center", marginBottom:24, cursor:"pointer"}} onClick={handleLogoTripleClick}><div style={{fontSize:48}}>🏪</div><div style={{fontFamily:"'Outfit'", fontSize:28, fontWeight:800, color:T.accent}}>Caisse SaaS Pro</div><div style={{fontSize:10, color:T.textMute}}>Triple-clic mode développeur</div></div>
+    <div style={{display:"flex", gap:8, marginBottom:20, background:T.surface2, borderRadius:12, padding:4}}><button onClick={()=>{setAuthMode("login"); setAuthError("");}} style={{flex:1, background:authMode==="login"?T.accent:"transparent", border:"none", borderRadius:8, padding:"8px", fontWeight:700, color:authMode==="login"?T.bg:T.textSub}}>Connexion</button><button onClick={()=>{setAuthMode("register"); setAuthError("");}} style={{flex:1, background:authMode==="register"?T.accent:"transparent", border:"none", borderRadius:8, padding:"8px", fontWeight:700, color:authMode==="register"?T.bg:T.textSub}}>Créer</button></div>
+    <div style={{display:"flex", flexDirection:"column", gap:12}}><input placeholder="Nom du commerce" value={authShopName} onChange={e=>setAuthShopName(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px", color:T.text}} />
+    {authMode==="register" && (<><input placeholder="Nom du propriétaire" value={authOwnerName} onChange={e=>setAuthOwnerName(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /><input placeholder="WhatsApp" value={authWhatsapp} onChange={e=>setAuthWhatsapp(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /><input placeholder="Téléphone" value={authPhone} onChange={e=>setAuthPhone(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} /></>)}
+    <input type="password" placeholder="Mot de passe" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} />
+    {authMode==="register" && <input type="password" placeholder="Confirmer" value={authConfirm} onChange={e=>setAuthConfirm(e.target.value)} style={{background:T.inputBg, borderRadius:14, padding:"14px"}} />}
+    {authError && <div style={{fontSize:12, color:T.red, textAlign:"center"}}>{authError}</div>}
+    <button onClick={authMode==="register"?handleRegister:handleLogin} disabled={authLoading} style={{background:T.accent, border:"none", borderRadius:16, padding:"16px", fontWeight:800, fontSize:16, color:T.bg}}>{authLoading ? "..." : (authMode==="register" ? "Créer mon commerce" : "Se connecter")}</button></div></div></div>);
+  return <MainApp session={session} T={T} themeName={themeName} setThemeName={setThemeName} logout={()=>setSession(null)} flashMsg={showToast} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+<script>
+if ("serviceWorker" in navigator) { navigator.serviceWorker.getRegistrations().then((regs) => { regs.forEach((reg) => reg.unregister()); }); }
+</script>
+</body>
+</html>
