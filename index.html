@@ -616,7 +616,21 @@ function PanierContent({ T, items, setItems, total, addSale, flashMsg, useBLE, p
       <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:18, fontWeight:800}}><span>TOTAL</span><span>{fmtPrice(total)}</span></div>
       <div style={{marginBottom:8}}><input type="number" placeholder="Montant reçu (F)" value={recu} onChange={e=>setRecu(e.target.value)} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, color:T.text}} /></div>
       {recu !== "" && monnaie !== null && (<div style={{padding:8, borderRadius:8, marginBottom:8, background: monnaie>=0 ? T.btnGreen.bg : T.btnRed.bg, textAlign:"center"}}><span style={{fontWeight:700}}>{monnaie>=0 ? "Monnaie à rendre:" : "Manque:"}</span> <span style={{fontSize:18, fontWeight:800}}>{fmtPrice(Math.abs(monnaie))}</span></div>)}
-      {posMode === "VENDEUR" ? (<><input placeholder="Note pour le caissier (optionnel)" ref={noteInputRef} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:8, color:T.text}} /><button onClick={handleSendToQueue} style={{width:"100%", background:T.orange, borderRadius:12, padding:12, fontWeight:700, color:T.bg, display:"flex", alignItems:"center", justifyContent:"center", gap:8}}>📤 Envoyer au caissier</button></>) : (<><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.green, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>🖨️ Valider & Imprimer</button><button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.blue, borderRadius:12, padding:12, fontWeight:700, color:T.bg}}>✅ Valider sans ticket</button></>)}
+      {posMode === "VENDEUR" ? (
+        <>
+          <input placeholder="Note pour le caissier (optionnel)" ref={noteInputRef} style={{width:"100%", background:T.inputBg, borderRadius:10, padding:10, marginBottom:8, color:T.text}} />
+          <button onClick={handleSendToQueue} style={{width:"100%", background:T.orange, borderRadius:12, padding:12, fontWeight:700, color:T.bg, display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:8}}>📤 Envoyer au caissier</button>
+          <div style={{display:"flex", gap:6}}>
+            <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); }} style={{flex:1, background:T.btnGreen.bg, border:`1px solid ${T.btnGreen.border}`, borderRadius:12, padding:10, fontWeight:700, color:T.green, fontSize:12}}>🖨️ Vendre & Imprimer</button>
+            <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); }} style={{flex:1, background:T.btnBlue.bg, border:`1px solid ${T.btnBlue.border}`, borderRadius:12, padding:10, fontWeight:700, color:T.blue, fontSize:12}}>✅ Vendre direct</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, true); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.green, borderRadius:12, padding:12, fontWeight:700, color:T.bg, marginBottom:8}}>🖨️ Valider & Imprimer</button>
+          <button onClick={()=>{ if(!items.length){ flashMsg("Panier vide"); return; } addSale(items, total, false); if(selectedCommande) markCommandeDone && markCommandeDone(selectedCommande.id); }} style={{width:"100%", background:T.blue, borderRadius:12, padding:12, fontWeight:700, color:T.bg}}>✅ Valider sans ticket</button>
+        </>
+      )}
     </div>
   </div>);
 }
@@ -1015,32 +1029,27 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 
 <script>
-// ── Enregistrement Service Worker PWA ──────────────────────────
+// ── PWA Service Worker — Compatible Vercel/HTTPS ──
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js", { scope: "./" })
       .then((reg) => {
-        console.log("[PWA] SW enregistré, scope:", reg.scope);
-
-        // Détection de mise à jour disponible
+        console.log("[PWA] SW enregistré :", reg.scope);
         reg.addEventListener("updatefound", () => {
-          const newWorker = reg.installing;
-          if (!newWorker) return;
-          newWorker.addEventListener("statechange", () => {
-            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              // Nouvelle version détectée → notifier l'UI via un événement custom
+          const w = reg.installing;
+          if (!w) return;
+          w.addEventListener("statechange", () => {
+            if (w.state === "installed" && navigator.serviceWorker.controller) {
               window.dispatchEvent(new CustomEvent("sw-update-available", { detail: { reg } }));
             }
           });
         });
-
-        // Rechargement automatique lors de l'activation d'un nouveau SW
         let refreshing = false;
         navigator.serviceWorker.addEventListener("controllerchange", () => {
           if (!refreshing) { refreshing = true; window.location.reload(); }
         });
       })
-      .catch((err) => console.warn("[PWA] Erreur SW:", err));
+      .catch(err => console.warn("[PWA] Erreur SW:", err));
   });
 }
 </script>
